@@ -14,12 +14,14 @@ type NetworkEvent struct {
 	SourcePort uint16
 	DestPort   uint16
 	Payload    []byte
+	Length     int
 	IsSYN      bool
 }
 
 func ParsePacket(packet gopacket.Packet) *NetworkEvent {
 	ne := &NetworkEvent{
 		Protocol: "UNKNOWN",
+		Length:   packet.Metadata().Length,
 	}
 
 	if ipLayer := packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
@@ -34,6 +36,8 @@ func ParsePacket(packet gopacket.Packet) *NetworkEvent {
 			ne.IPSource = ip.SrcIP
 			ne.IPDest = ip.DstIP
 		}
+	} else {
+		return nil
 	}
 
 	if tcpLayer := packet.Layer(layers.LayerTypeTCP); tcpLayer != nil {

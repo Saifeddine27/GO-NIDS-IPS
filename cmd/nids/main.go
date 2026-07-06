@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/Saifeddine27/nids-go/internal/capture"
-	"github.com/Saifeddine27/nids-go/internal/config"
 	"github.com/Saifeddine27/nids-go/internal/engine"
 	"github.com/Saifeddine27/nids-go/internal/filter"
 	"github.com/Saifeddine27/nids-go/internal/parser"
@@ -44,19 +43,7 @@ func main() {
 
 	fmt.Println("--------------------------------------------------")
 
-	cfg, err := config.LoadConfig("rules/rules.yaml")
-	if err != nil {
-		fmt.Printf("Erreur fatale au démarrage : %v\n", err)
-		return
-	}
-	compiledRules, err := engine.CompileRules(cfg)
-	if err != nil {
-		fmt.Printf("Erreur fatale : impossible de compiler les règles : %v\n", err)
-		return
-	}
-	fmt.Printf("%d règles chargées avec succès.\n", len(compiledRules))
-
-	eng := engine.NewEngine(compiledRules)
+	eng := engine.NewEngine()
 	sniffer := capture.NewSniffer(selectedInterface)
 	fmt.Println("Listening on:", sniffer.Interface)
 	packetChan := make(chan gopacket.Packet)
@@ -65,11 +52,8 @@ func main() {
 		ne := parser.ParsePacket(packet)
 		if filter.IsAllowed(ne) {
 			if ne.Protocol == "TCP" || ne.Protocol == "UDP" {
-				fmt.Printf("%s:%d --> %s:%d : %s\n", ne.IPSource, ne.SourcePort,
-					ne.IPDest, ne.DestPort, ne.Protocol)
 				eng.Process(*ne)
 			} else if ne.Protocol == "ICMP" {
-				fmt.Printf("%s --> %s : %s\n", ne.IPSource, ne.IPDest, ne.Protocol)
 				eng.DetectorPingSweep(*ne)
 			}
 		}

@@ -3,58 +3,32 @@ package engine
 import (
 	"fmt"
 	"net"
-	"regexp"
+	"sync"
 	"time"
 
 	"github.com/Saifeddine27/nids-go/internal/alert"
-	"github.com/Saifeddine27/nids-go/internal/config"
 	"github.com/Saifeddine27/nids-go/internal/parser"
 )
 
 type Engine struct {
+	mu            sync.RWMutex
 	PortScanMem   map[string]map[uint16]time.Time
 	ICMPMem       map[string]map[string]time.Time
 	SYNMem        map[string][]time.Time
 	BruteForceMem map[string]map[uint16][]time.Time
 	UDPFloodMem   map[string][]time.Time
-	Rules         []CompiledRule
 	lastAlert     map[string]time.Time
 }
 
-type CompiledRule struct {
-	Nom         string
-	Description string
-	Severity    string
-	CompiledExp *regexp.Regexp
-}
-
-func NewEngine(rules []CompiledRule) *Engine {
+func NewEngine() *Engine {
 	return &Engine{
 		PortScanMem:   make(map[string]map[uint16]time.Time),
 		ICMPMem:       make(map[string]map[string]time.Time),
 		SYNMem:        make(map[string][]time.Time),
 		BruteForceMem: make(map[string]map[uint16][]time.Time),
 		UDPFloodMem:   make(map[string][]time.Time),
-		Rules:         rules,
 		lastAlert:     make(map[string]time.Time),
 	}
-}
-
-func CompileRules(cfg *config.Config) ([]CompiledRule, error) {
-	tab := make([]CompiledRule, 0, len(cfg.Rules))
-	for _, rule := range cfg.Rules {
-		compExp, err := regexp.Compile(rule.Pattern)
-		if err != nil {
-			return nil, fmt.Errorf("règle '%s' : pattern invalide : %v", rule.Name, err)
-		}
-		tab = append(tab, CompiledRule{
-			Nom:         rule.Name,
-			Description: rule.Description,
-			Severity:    rule.Severity,
-			CompiledExp: compExp,
-		})
-	}
-	return tab, nil
 }
 
 const alertCooldown = 10 * time.Second
@@ -71,22 +45,8 @@ func (e *Engine) shouldAlert(key string) bool {
 func (e *Engine) Process(ne parser.NetworkEvent) {
 	now := time.Now()
 	ip := ne.IPSource.String()
-
-	if len(ne.Payload) > 0 {
-		attackName, attackDesc, severity := CheckPayload(ne.Payload, e.Rules)
-		if attackName != "" {
-			key := ip + "|" + attackName
-			if e.shouldAlert(key) {
-				logAndPrint(&alert.AlertInfos{
-					Time:        now,
-					IpSrc:       ne.IPSource,
-					AttaqueType: attackName,
-					DegreAlert:  severity,
-					Description: fmt.Sprintf("Signature détectée : %s", attackDesc),
-				})
-			}
-		}
-	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
 	e.detectPortScan(ip, ne.DestPort, now)
 
