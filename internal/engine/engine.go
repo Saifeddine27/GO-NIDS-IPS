@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Saifeddine27/nids-go/internal/alert"
+	"github.com/Saifeddine27/nids-go/internal/ips"
 	"github.com/Saifeddine27/nids-go/internal/parser"
 )
 
@@ -18,9 +19,10 @@ type Engine struct {
 	BruteForceMem map[string]map[uint16][]time.Time
 	UDPFloodMem   map[string][]time.Time
 	lastAlert     map[string]time.Time
+	blocker       ips.Blocker
 }
 
-func NewEngine() *Engine {
+func NewEngine(b ips.Blocker) *Engine {
 	return &Engine{
 		PortScanMem:   make(map[string]map[uint16]time.Time),
 		ICMPMem:       make(map[string]map[string]time.Time),
@@ -28,6 +30,7 @@ func NewEngine() *Engine {
 		BruteForceMem: make(map[string]map[uint16][]time.Time),
 		UDPFloodMem:   make(map[string][]time.Time),
 		lastAlert:     make(map[string]time.Time),
+		blocker:       b,
 	}
 }
 
@@ -70,6 +73,16 @@ func (e *Engine) Process(ne parser.NetworkEvent) {
 	}
 }
 
+func (e *Engine) triggerPrevention(ip string) {
+	if e.blocker != nil {
+		go func() {
+			if err := e.blocker.BlockIP(ip, 10*time.Minute); err != nil {
+				fmt.Printf("[IPS ERREUR] Impossible d'exécuter l'action préventive sur %s: %v\n", ip, err)
+			}
+		}()
+	}
+}
+
 func (e *Engine) detectPortScan(ip string, destPort uint16, now time.Time) {
 	window := 10 * time.Second
 
@@ -96,6 +109,7 @@ func (e *Engine) detectPortScan(ip string, destPort uint16, now time.Time) {
 				DegreAlert:  "CRITICAL",
 				Description: fmt.Sprintf("%d ports uniques ciblés en moins de 10s", uniquePorts),
 			})
+			e.triggerPrevention(ip)
 		}
 	} else if uniquePorts >= 5 {
 		key := ip + "|PORT_SCAN|WARNING"
@@ -136,6 +150,7 @@ func (e *Engine) detectSYNFlood(ip string, now time.Time) {
 				DegreAlert:  "CRITICAL",
 				Description: fmt.Sprintf("%d paquets SYN en moins de 5s (possible SYN flood)", len(e.SYNMem[ip])),
 			})
+			e.triggerPrevention(ip)
 		}
 	}
 }
@@ -169,6 +184,7 @@ func (e *Engine) detectBruteForce(ip string, port uint16, service string, now ti
 				DegreAlert:  "CRITICAL",
 				Description: fmt.Sprintf("%d connexions vers %s (port %d) en 30s", count, service, port),
 			})
+			e.triggerPrevention(ip)
 		}
 	}
 }
@@ -198,6 +214,7 @@ func (e *Engine) detectUDPFlood(ip string, now time.Time) {
 				DegreAlert:  "CRITICAL",
 				Description: fmt.Sprintf("%d paquets UDP en moins de 5s", len(e.UDPFloodMem[ip])),
 			})
+			e.triggerPrevention(ip)
 		}
 	}
 }
@@ -207,6 +224,9 @@ func (e *Engine) DetectorPingSweep(ne parser.NetworkEvent) {
 	now := time.Now()
 	ipSrc := ne.IPSource.String()
 	ipDst := ne.IPDest.String()
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
 
 	if _, exists := e.ICMPMem[ipSrc]; !exists {
 		e.ICMPMem[ipSrc] = make(map[string]time.Time)
@@ -232,6 +252,7 @@ func (e *Engine) DetectorPingSweep(ne parser.NetworkEvent) {
 				DegreAlert:  "CRITICAL",
 				Description: fmt.Sprintf("%d hôtes uniques pingués en moins de 10s", uniqueHosts),
 			})
+			e.triggerPrevention(ipSrc)
 		}
 	} else if uniqueHosts >= 4 {
 		key := ipSrc + "|PING_SWEEP|WARNING"

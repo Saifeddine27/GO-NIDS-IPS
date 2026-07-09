@@ -15,10 +15,19 @@ var noisePorts = map[uint16]bool{
 	5355: true, // LLMNR
 	1900: true, // SSDP
 }
+var whitelistedIPs = make(map[string]bool)
+
+func AddWhitelistedIP(ip string) {
+	whitelistedIPs[ip] = true
+}
 
 func IsAllowed(ne *parser.NetworkEvent) bool {
 
 	if ne.IPSource == nil || ne.IPDest == nil {
+		return false
+	}
+
+	if whitelistedIPs[ne.IPSource.String()] {
 		return false
 	}
 
