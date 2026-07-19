@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Saifeddine27/nids-go/internal/alert"
+	"github.com/Saifeddine27/nids-go/internal/config"
 	"github.com/Saifeddine27/nids-go/internal/ips"
 	"github.com/Saifeddine27/nids-go/internal/parser"
 )
@@ -20,9 +21,13 @@ type Engine struct {
 	UDPFloodMem   map[string][]time.Time
 	lastAlert     map[string]time.Time
 	blocker       ips.Blocker
+	cfg           *config.Config
 }
 
-func NewEngine(b ips.Blocker) *Engine {
+func NewEngine(b ips.Blocker, cfg *config.Config) *Engine {
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
 	return &Engine{
 		PortScanMem:   make(map[string]map[uint16]time.Time),
 		ICMPMem:       make(map[string]map[string]time.Time),
@@ -31,12 +36,12 @@ func NewEngine(b ips.Blocker) *Engine {
 		UDPFloodMem:   make(map[string][]time.Time),
 		lastAlert:     make(map[string]time.Time),
 		blocker:       b,
+		cfg:           cfg,
 	}
 }
 
-const alertCooldown = 10 * time.Second
-
 func (e *Engine) shouldAlert(key string) bool {
+	alertCooldown := time.Duration(e.cfg.AlertCooldownSeconds) * time.Second
 	last, seen := e.lastAlert[key]
 	if !seen || time.Since(last) >= alertCooldown {
 		e.lastAlert[key] = time.Now()
@@ -84,7 +89,7 @@ func (e *Engine) triggerPrevention(ip string) {
 }
 
 func (e *Engine) detectPortScan(ip string, destPort uint16, now time.Time) {
-	window := 10 * time.Second
+	window := time.Duration(e.cfg.PortScan.WindowSeconds) * time.Second
 
 	if _, exists := e.PortScanMem[ip]; !exists {
 		e.PortScanMem[ip] = make(map[uint16]time.Time)
@@ -99,7 +104,7 @@ func (e *Engine) detectPortScan(ip string, destPort uint16, now time.Time) {
 
 	uniquePorts := len(e.PortScanMem[ip])
 
-	if uniquePorts >= 15 {
+	if uniquePorts >= e.cfg.PortScan.ThresholdCritical {
 		key := ip + "|PORT_SCAN|CRITICAL"
 		if e.shouldAlert(key) {
 			logAndPrint(&alert.AlertInfos{
@@ -107,11 +112,11 @@ func (e *Engine) detectPortScan(ip string, destPort uint16, now time.Time) {
 				IpSrc:       net.ParseIP(ip),
 				AttaqueType: "PORT_SCAN",
 				DegreAlert:  "CRITICAL",
-				Description: fmt.Sprintf("%d ports uniques ciblés en moins de 10s", uniquePorts),
+				Description: fmt.Sprintf("%d ports uniques ciblés en moins de %ds", uniquePorts, e.cfg.PortScan.WindowSeconds),
 			})
 			e.triggerPrevention(ip)
 		}
-	} else if uniquePorts >= 5 {
+	} else if uniquePorts >= e.cfg.PortScan.ThresholdWarning {
 		key := ip + "|PORT_SCAN|WARNING"
 		if e.shouldAlert(key) {
 			logAndPrint(&alert.AlertInfos{
@@ -119,15 +124,15 @@ func (e *Engine) detectPortScan(ip string, destPort uint16, now time.Time) {
 				IpSrc:       net.ParseIP(ip),
 				AttaqueType: "PORT_SCAN",
 				DegreAlert:  "WARNING",
-				Description: fmt.Sprintf("%d ports uniques ciblés en moins de 10s", uniquePorts),
+				Description: fmt.Sprintf("%d ports uniques ciblés en moins de %ds", uniquePorts, e.cfg.PortScan.WindowSeconds),
 			})
 		}
 	}
 }
 
 func (e *Engine) detectSYNFlood(ip string, now time.Time) {
-	window := 5 * time.Second
-	threshold := 100
+	window := time.Duration(e.cfg.SYNFlood.WindowSeconds) * time.Second
+	threshold := e.cfg.SYNFlood.Threshold
 
 	e.SYNMem[ip] = append(e.SYNMem[ip], now)
 
@@ -148,7 +153,7 @@ func (e *Engine) detectSYNFlood(ip string, now time.Time) {
 				IpSrc:       net.ParseIP(ip),
 				AttaqueType: "SYN_FLOOD",
 				DegreAlert:  "CRITICAL",
-				Description: fmt.Sprintf("%d paquets SYN en moins de 5s (possible SYN flood)", len(e.SYNMem[ip])),
+				Description: fmt.Sprintf("%d paquets SYN en moins de %ds (possible SYN flood)", len(e.SYNMem[ip]), e.cfg.SYNFlood.WindowSeconds),
 			})
 			e.triggerPrevention(ip)
 		}
@@ -156,8 +161,8 @@ func (e *Engine) detectSYNFlood(ip string, now time.Time) {
 }
 
 func (e *Engine) detectBruteForce(ip string, port uint16, service string, now time.Time) {
-	window := 30 * time.Second
-	threshold := 20
+	window := time.Duration(e.cfg.BruteForce.WindowSeconds) * time.Second
+	threshold := e.cfg.BruteForce.Threshold
 
 	if _, exists := e.BruteForceMem[ip]; !exists {
 		e.BruteForceMem[ip] = make(map[uint16][]time.Time)
@@ -182,7 +187,7 @@ func (e *Engine) detectBruteForce(ip string, port uint16, service string, now ti
 				IpSrc:       net.ParseIP(ip),
 				AttaqueType: "BRUTE_FORCE_" + service,
 				DegreAlert:  "CRITICAL",
-				Description: fmt.Sprintf("%d connexions vers %s (port %d) en 30s", count, service, port),
+				Description: fmt.Sprintf("%d connexions vers %s (port %d) en %ds", count, service, port, e.cfg.BruteForce.WindowSeconds),
 			})
 			e.triggerPrevention(ip)
 		}
@@ -190,8 +195,8 @@ func (e *Engine) detectBruteForce(ip string, port uint16, service string, now ti
 }
 
 func (e *Engine) detectUDPFlood(ip string, now time.Time) {
-	window := 5 * time.Second
-	threshold := 200
+	window := time.Duration(e.cfg.UDPFlood.WindowSeconds) * time.Second
+	threshold := e.cfg.UDPFlood.Threshold
 
 	e.UDPFloodMem[ip] = append(e.UDPFloodMem[ip], now)
 
@@ -212,7 +217,7 @@ func (e *Engine) detectUDPFlood(ip string, now time.Time) {
 				IpSrc:       net.ParseIP(ip),
 				AttaqueType: "UDP_FLOOD",
 				DegreAlert:  "CRITICAL",
-				Description: fmt.Sprintf("%d paquets UDP en moins de 5s", len(e.UDPFloodMem[ip])),
+				Description: fmt.Sprintf("%d paquets UDP en moins de %ds", len(e.UDPFloodMem[ip]), e.cfg.UDPFlood.WindowSeconds),
 			})
 			e.triggerPrevention(ip)
 		}
@@ -220,7 +225,7 @@ func (e *Engine) detectUDPFlood(ip string, now time.Time) {
 }
 
 func (e *Engine) DetectorPingSweep(ne parser.NetworkEvent) {
-	window := 10 * time.Second
+	window := time.Duration(e.cfg.PingSweep.WindowSeconds) * time.Second
 	now := time.Now()
 	ipSrc := ne.IPSource.String()
 	ipDst := ne.IPDest.String()
@@ -242,7 +247,7 @@ func (e *Engine) DetectorPingSweep(ne parser.NetworkEvent) {
 
 	uniqueHosts := len(e.ICMPMem[ipSrc])
 
-	if uniqueHosts >= 10 {
+	if uniqueHosts >= e.cfg.PingSweep.ThresholdCritical {
 		key := ipSrc + "|PING_SWEEP|CRITICAL"
 		if e.shouldAlert(key) {
 			logAndPrint(&alert.AlertInfos{
@@ -250,11 +255,11 @@ func (e *Engine) DetectorPingSweep(ne parser.NetworkEvent) {
 				IpSrc:       net.ParseIP(ipSrc),
 				AttaqueType: "PING_SWEEP",
 				DegreAlert:  "CRITICAL",
-				Description: fmt.Sprintf("%d hôtes uniques pingués en moins de 10s", uniqueHosts),
+				Description: fmt.Sprintf("%d hôtes uniques pingués en moins de %ds", uniqueHosts, e.cfg.PingSweep.WindowSeconds),
 			})
 			e.triggerPrevention(ipSrc)
 		}
-	} else if uniqueHosts >= 4 {
+	} else if uniqueHosts >= e.cfg.PingSweep.ThresholdWarning {
 		key := ipSrc + "|PING_SWEEP|WARNING"
 		if e.shouldAlert(key) {
 			logAndPrint(&alert.AlertInfos{
@@ -262,7 +267,7 @@ func (e *Engine) DetectorPingSweep(ne parser.NetworkEvent) {
 				IpSrc:       net.ParseIP(ipSrc),
 				AttaqueType: "PING_SWEEP",
 				DegreAlert:  "WARNING",
-				Description: fmt.Sprintf("%d hôtes uniques pingués en moins de 10s", uniqueHosts),
+				Description: fmt.Sprintf("%d hôtes uniques pingués en moins de %ds", uniqueHosts, e.cfg.PingSweep.WindowSeconds),
 			})
 		}
 	}

@@ -17,7 +17,7 @@ type AlertInfos struct {
 	Description string    `json:"description"`
 }
 
-const maxLogSizeBytes = 10 * 1024 * 1024 // 10 MB
+const maxLogSizeBytes = 10 * 1024 * 1024
 
 var logMu sync.Mutex
 

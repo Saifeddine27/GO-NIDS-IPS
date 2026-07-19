@@ -7,13 +7,13 @@ import (
 )
 
 var noisePorts = map[uint16]bool{
-	53:   true, // DNS
-	67:   true, // DHCP server
-	68:   true, // DHCP client
-	123:  true, // NTP
-	5353: true, // mDNS
-	5355: true, // LLMNR
-	1900: true, // SSDP
+	53:   true,
+	67:   true,
+	68:   true,
+	123:  true,
+	5353: true,
+	5355: true,
+	1900: true,
 }
 var whitelistedIPs = make(map[string]bool)
 

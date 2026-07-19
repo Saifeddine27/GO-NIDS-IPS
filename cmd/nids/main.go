@@ -8,9 +8,10 @@ import (
 	"strings"
 
 	"github.com/Saifeddine27/nids-go/internal/capture"
+	"github.com/Saifeddine27/nids-go/internal/config"
 	"github.com/Saifeddine27/nids-go/internal/engine"
 	"github.com/Saifeddine27/nids-go/internal/filter"
-	"github.com/Saifeddine27/nids-go/internal/ips" // Importation du module de prévention
+	"github.com/Saifeddine27/nids-go/internal/ips"
 	"github.com/Saifeddine27/nids-go/internal/parser"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
@@ -23,7 +24,7 @@ func main() {
 		return
 	}
 
-	fmt.Println("🌐 Interfaces réseau disponibles :")
+	fmt.Println("Interfaces réseau disponibles :")
 
 	for i, dev := range devices {
 		desc := dev.Description
@@ -33,7 +34,7 @@ func main() {
 		fmt.Printf("  [%d] %s (%s)\n", i, dev.Name, desc)
 	}
 
-	fmt.Print("\n👉 Entrez le nom de l'interface à écouter (ex: eth0, lo, wlan0) ou 'any' pour toutes : ")
+	fmt.Print("\n Entrez le nom de l'interface à écouter (ex: eth0, lo, wlan0) ou 'any' pour toutes : ")
 	reader := bufio.NewReader(os.Stdin)
 	selectedInterface, _ := reader.ReadString('\n')
 	selectedInterface = strings.TrimSpace(selectedInterface)
@@ -57,7 +58,13 @@ func main() {
 
 	blocker := ips.NewIPTablesBlocker()
 
-	eng := engine.NewEngine(blocker)
+	cfg, err := config.LoadConfig("config.yaml")
+	if err != nil {
+		fmt.Printf("Erreur lors du chargement de la config, utilisation des valeurs par défaut: %v\n", err)
+		cfg = config.DefaultConfig()
+	}
+
+	eng := engine.NewEngine(blocker, cfg)
 
 	sniffer := capture.NewSniffer(selectedInterface)
 	fmt.Println("Listening on:", sniffer.Interface)

@@ -23,7 +23,7 @@ func (b *IPTablesBlocker) BlockIP(ip string, duration time.Duration) error {
 		return fmt.Errorf("impossible de bloquer l'IP %s via iptables: %v", ip, err)
 	}
 
-	log.Printf("[IPS] 🛡️ IP bannie avec succès : %s pour %v\n", ip, duration)
+	log.Printf("[IPS] IP bannie avec succès : %s pour %v\n", ip, duration)
 
 	go b.unblockAfter(ip, duration)
 
@@ -35,9 +35,9 @@ func (b *IPTablesBlocker) unblockAfter(ip string, duration time.Duration) {
 
 	cmd := exec.Command("iptables", "-D", "INPUT", "-s", ip, "-j", "DROP")
 	if err := cmd.Run(); err != nil {
-		log.Printf("[IPS ERREUR] ⚠️ Échec du déblocage automatique pour l'IP %s : %v\n", ip, err)
+		log.Printf("[IPS ERREUR] Échec du déblocage automatique pour l'IP %s : %v\n", ip, err)
 		return
 	}
 
-	log.Printf("[IPS] 🔓 IP débloquée automatiquement : %s\n", ip)
+	log.Printf("[IPS] IP débloquée automatiquement : %s\n", ip)
 }

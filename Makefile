@@ -1,4 +1,4 @@
-.PHONY: build run setup clean
+.PHONY: build run setup clean test
 
 setup:
 	go mod tidy
@@ -11,4 +11,7 @@ run: build
 
 clean:
 	rm -rf ./bin
+
+test:
+	go test -v ./internal/engine
 

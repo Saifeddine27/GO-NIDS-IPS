@@ -1,0 +1,25 @@
+# Configuration du NIDS
+
+alert_cooldown_seconds: 10
+
+port_scan:
+  window_seconds: 10
+  threshold_warning: 5
+  threshold_critical: 15
+
+syn_flood:
+  window_seconds: 5
+  threshold: 100
+
+brute_force:
+  window_seconds: 30
+  threshold: 20
+
+udp_flood:
+  window_seconds: 5
+  threshold: 200
+
+ping_sweep:
+  window_seconds: 10
+  threshold_warning: 4
+  threshold_critical: 10
