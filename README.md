@@ -40,8 +40,8 @@ Pour récupérer et lancer le projet chez vous :
 
 ```bash
 # On clone le repo
-git clone https://github.com/Saifeddine27/nids-go.git
-cd nids-go
+git clone https://github.com/Saifeddine27/GO-NIDS-IPS.git
+cd GO-NIDS-IPS
 
 # On télécharge les dépendances
 make setup
