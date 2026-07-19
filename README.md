@@ -1,4 +1,4 @@
-# nids-go
+# Go-NIDS/IPS
 
 Salut !  J'ai développé ce petit projet de NIDS (Network Intrusion Detection System) en Go pour expérimenter avec l'analyse de trafic réseau en temps réel. 
 L'idée est d'écouter les paquets qui circulent et de lever des alertes dès qu'un comportement suspect est détecté, tout en gardant un outil léger et performant.
