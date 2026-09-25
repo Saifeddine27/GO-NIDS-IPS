@@ -7,7 +7,8 @@ import (
 )
 
 type Config struct {
-	AlertCooldownSeconds int `yaml:"alert_cooldown_seconds"`
+	LogFile              string `yaml:"log_file"`
+	AlertCooldownSeconds int    `yaml:"alert_cooldown_seconds"`
 
 	PortScan struct {
 		WindowSeconds     int `yaml:"window_seconds"`
@@ -39,6 +40,7 @@ type Config struct {
 
 func DefaultConfig() *Config {
 	cfg := &Config{
+		LogFile:              "alerts.json",
 		AlertCooldownSeconds: 10,
 	}
 	cfg.PortScan.WindowSeconds = 10

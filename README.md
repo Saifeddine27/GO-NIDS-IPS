@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.jpg" alt="NIDS-Go Logo" width="200"/>
+</p>
+
 # Go-NIDS/IPS
 
 Salut !  J'ai développé ce petit projet de NIDS (Network Intrusion Detection System) en Go pour expérimenter avec l'analyse de trafic réseau en temps réel. 
@@ -74,9 +78,10 @@ Entrer le nom de l'interface souhaitée (ex: `eth0`) ou `any` pour capturer sur 
 
 ## Configuration
 
-Les seuils de détection et les fenêtres de temps sont personnalisables via le fichier `config.yaml` à la racine du projet. Cela permet d'ajuster la sensibilité du NIDS à la volée, sans recompiler :
+Les seuils de détection, les fenêtres de temps et le fichier de log sont personnalisables via le fichier `config.yaml` à la racine du projet. Cela permet d'ajuster la sensibilité du NIDS à la volée, sans recompiler :
 
 ```yaml
+log_file: "alerts.json"
 alert_cooldown_seconds: 10
 
 port_scan:
@@ -98,13 +103,13 @@ Les alertes s'affichent dans le terminal en temps réel :
 [-] WARNING  | PING_SWEEP     | 192.168.1.10 | 5 hôtes uniques pingués en moins de 10s
 ```
 
-Elles sont aussi enregistrées dans `alerts.json` (format JSON Lines). Le fichier est automatiquement archivé sous `alerts_YYYYMMDD_HHMMSS.json` dès qu'il dépasse 10 MB.
+Elles sont aussi enregistrées dans un fichier de log au format JSON Lines (par défaut `alerts.json`, configurable via `config.yaml`). Le fichier est automatiquement archivé dès qu'il dépasse 10 MB.
 
 ---
 
 ## Prévention Active (IPS)
 
-En plus de détecter les attaques, le moteur agit comme un IPS (Intrusion Prevention System). Lorsqu'une attaque est jugée "CRITICAL", l'IP de l'attaquant est **automatiquement bloquée** au niveau du pare-feu Linux (`iptables`) pendant 10 minutes.
+En plus de détecter les attaques, le moteur agit comme un IPS (Intrusion Prevention System). Lorsqu'une attaque est jugée "CRITICAL", l'IP de l'attaquant est **automatiquement bloquée** au niveau du pare-feu Linux (`iptables`) pendant 10 minutes. Un système de déduplication empêche l'ajout de règles iptables en double pour la même IP.
 
 Pour vérifier que le blocage fonctionne bien lors de vos tests, vous pouvez afficher la liste des IPs actuellement bannies par la machine avec cette commande :
 
@@ -113,11 +118,23 @@ sudo iptables -L INPUT -v -n | grep DROP
 ```
 *(Le déblocage se fait tout seul en arrière-plan une fois le temps d'exclusion écoulé).*
 
+L'outil gère aussi l'**arrêt gracieux** : un `Ctrl+C` (SIGINT/SIGTERM) stoppe proprement la capture, libère les ressources et affiche un message de confirmation.
+
 ---
 
 ## Tests Unitaires
 
-Le moteur de détection dispose d'une suite de tests pour garantir sa fiabilité de détection sans avoir à brancher l'outil sur un vrai réseau hostile. Le système simule l'injection de paquets frauduleux (SYN Flood, Ping Sweep, etc.) et valide mathématiquement que les alertes et les blocages sont déclenchés correctement.
+Le moteur de détection dispose d'une suite de **7 tests** couvrant tous les scénarios de détection, y compris des tests négatifs qui vérifient que le trafic normal ne génère pas de faux positifs.
+
+| Test | Scénario | Vérifie |
+|---|---|---|
+| `TestSYNFlood` | 100 paquets SYN purs en rafale | Alerte CRITICAL + blocage IP |
+| `TestPortScan` | 15 ports scannés rapidement | Alerte WARNING puis CRITICAL + blocage |
+| `TestPingSweep` | 10 hôtes pingués en ICMP | Alerte WARNING puis CRITICAL + blocage |
+| `TestBruteForce` | 20 connexions SSH rapides | Alerte CRITICAL + blocage IP |
+| `TestUDPFlood` | 200 paquets UDP en rafale | Alerte CRITICAL + blocage IP |
+| `TestNormalTraffic_NoAlert` | Trafic sous tous les seuils | Aucune alerte, IP non bloquée |
+| `TestPortScan_WarningOnly` | 5 ports scannés | WARNING oui, CRITICAL non, pas de blocage |
 
 Pour lancer les tests :
 ```bash
@@ -130,15 +147,17 @@ make test
 
 ```
 nids-go/
+├── assets/            # Logo et ressources visuelles
 ├── cmd/nids/          # Point d'entrée principal
 ├── internal/
 │   ├── alert/         # Journalisation des alertes (JSON + rotation)
 │   ├── capture/       # Capture de paquets (libpcap)
 │   ├── config/        # Chargement de la configuration YAML
-│   ├── engine/        # Moteur de détection (heuristiques)
+│   ├── engine/        # Moteur de détection (heuristiques) + tests
 │   ├── filter/        # Filtrage du trafic bruit (DNS, DHCP, NTP...)
-│   ├── ips/           # Prévention (blocage IP)
+│   ├── ips/           # Prévention (blocage IP + déduplication)
 │   └── parser/        # Parsing des paquets réseau
+├── config.yaml        # Configuration des seuils de détection
 └── Makefile
 ```
 

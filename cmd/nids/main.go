@@ -3,10 +3,14 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"net"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
+	"github.com/Saifeddine27/nids-go/internal/alert"
 	"github.com/Saifeddine27/nids-go/internal/capture"
 	"github.com/Saifeddine27/nids-go/internal/config"
 	"github.com/Saifeddine27/nids-go/internal/engine"
@@ -64,12 +68,30 @@ func main() {
 		cfg = config.DefaultConfig()
 	}
 
+	alert.SetLogFile(cfg.LogFile)
+
 	eng := engine.NewEngine(blocker, cfg)
 
 	sniffer := capture.NewSniffer(selectedInterface)
 	fmt.Println("Listening on:", sniffer.Interface)
 	packetChan := make(chan gopacket.Packet)
-	go sniffer.Start(packetChan)
+
+	go func() {
+		if err := sniffer.Start(packetChan); err != nil {
+			log.Fatalf("Erreur de capture : %v", err)
+		}
+	}()
+
+	// Graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigChan
+		fmt.Printf("\n[*] Signal reçu (%s), arrêt en cours...\n", sig)
+		sniffer.Stop()
+		eng.Stop()
+	}()
 
 	for packet := range packetChan {
 		ne := parser.ParsePacket(packet)
@@ -84,4 +106,6 @@ func main() {
 			}
 		}
 	}
+
+	fmt.Println("[*] NIDS arrêté proprement.")
 }

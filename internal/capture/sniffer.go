@@ -1,7 +1,7 @@
 package capture
 
 import (
-	"log"
+	"fmt"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
@@ -9,6 +9,7 @@ import (
 
 type Sniffer struct {
 	Interface string
+	handle    *pcap.Handle
 }
 
 func NewSniffer(iface string) *Sniffer {
@@ -17,14 +18,22 @@ func NewSniffer(iface string) *Sniffer {
 	}
 }
 
-func (s *Sniffer) Start(packetChan chan gopacket.Packet) {
+func (s *Sniffer) Start(packetChan chan gopacket.Packet) error {
 	handle, err := pcap.OpenLive(s.Interface, 1600, true, pcap.BlockForever)
 	if err != nil {
-		log.Fatalf("error opening interface %s: %v", s.Interface, err)
+		return fmt.Errorf("error opening interface %s: %w", s.Interface, err)
 	}
-	defer handle.Close()
+	s.handle = handle
 	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 	for packet := range packetSource.Packets() {
 		packetChan <- packet
+	}
+	close(packetChan)
+	return nil
+}
+
+func (s *Sniffer) Stop() {
+	if s.handle != nil {
+		s.handle.Close()
 	}
 }

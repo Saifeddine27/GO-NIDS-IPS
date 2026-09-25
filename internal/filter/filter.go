@@ -2,6 +2,7 @@ package filter
 
 import (
 	"net"
+	"sync"
 
 	"github.com/Saifeddine27/nids-go/internal/parser"
 )
@@ -16,8 +17,11 @@ var noisePorts = map[uint16]bool{
 	1900: true,
 }
 var whitelistedIPs = make(map[string]bool)
+var whitelistMu sync.RWMutex
 
 func AddWhitelistedIP(ip string) {
+	whitelistMu.Lock()
+	defer whitelistMu.Unlock()
 	whitelistedIPs[ip] = true
 }
 
@@ -27,7 +31,11 @@ func IsAllowed(ne *parser.NetworkEvent) bool {
 		return false
 	}
 
-	if whitelistedIPs[ne.IPSource.String()] {
+	whitelistMu.RLock()
+	isWhitelisted := whitelistedIPs[ne.IPSource.String()]
+	whitelistMu.RUnlock()
+
+	if isWhitelisted {
 		return false
 	}
 
@@ -50,5 +58,5 @@ func isMulticast(ip net.IP) bool {
 	if ip == nil {
 		return false
 	}
-	return ip[0] >= 224 && ip[0] <= 239
+	return ip.IsMulticast()
 }

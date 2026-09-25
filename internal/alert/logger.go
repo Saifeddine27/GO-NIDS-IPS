@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -20,22 +22,27 @@ type AlertInfos struct {
 const maxLogSizeBytes = 10 * 1024 * 1024
 
 var logMu sync.Mutex
+var logFilePath = "alerts.json"
+
+func SetLogFile(path string) {
+	logFilePath = path
+}
 
 func LogAlert(info *AlertInfos) {
 	logMu.Lock()
 	defer logMu.Unlock()
 
-	const logFile = "alerts.json"
-
-	if fi, err := os.Stat(logFile); err == nil && fi.Size() >= maxLogSizeBytes {
-		rotated := fmt.Sprintf("alerts_%s.json", time.Now().Format("20060102_150405"))
-		if err := os.Rename(logFile, rotated); err != nil {
+	if fi, err := os.Stat(logFilePath); err == nil && fi.Size() >= maxLogSizeBytes {
+		ext := filepath.Ext(logFilePath)
+		base := strings.TrimSuffix(logFilePath, ext)
+		rotated := fmt.Sprintf("%s_%s%s", base, time.Now().Format("20060102_150405"), ext)
+		if err := os.Rename(logFilePath, rotated); err != nil {
 			fmt.Printf("Erreur lors de la rotation du log : %v\n", err)
 		}
 	}
 
 	flags := os.O_APPEND | os.O_CREATE | os.O_WRONLY
-	file, err := os.OpenFile(logFile, flags, 0644)
+	file, err := os.OpenFile(logFilePath, flags, 0644)
 	if err != nil {
 		fmt.Printf("Erreur lors de l'ouverture du fichier : %v\n", err)
 		return

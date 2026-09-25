@@ -117,3 +117,143 @@ func TestPingSweep(t *testing.T) {
 		t.Errorf("L'IP %s aurait dû être bloquée", attackerIP)
 	}
 }
+
+func TestBruteForce(t *testing.T) {
+	eng, mockBlocker := setupTestEngine()
+	attackerIP := "10.0.0.102"
+
+	for i := 0; i < 20; i++ {
+		eng.Process(parser.NetworkEvent{
+			IPSource: net.ParseIP(attackerIP),
+			IPDest:   net.ParseIP("192.168.1.10"),
+			Protocol: "TCP",
+			DestPort: 22, // SSH
+		})
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	eng.mu.RLock()
+	defer eng.mu.RUnlock()
+
+	alertKey := attackerIP + "|BRUTE_FORCE_SSH"
+	if _, exists := eng.lastAlert[alertKey]; !exists {
+		t.Errorf("L'alerte BRUTE_FORCE_SSH n'a pas été déclenchée")
+	}
+
+	if !mockBlocker.IsBlocked(attackerIP) {
+		t.Errorf("L'IP %s aurait dû être bloquée", attackerIP)
+	}
+}
+
+func TestUDPFlood(t *testing.T) {
+	eng, mockBlocker := setupTestEngine()
+	attackerIP := "10.0.0.103"
+
+	for i := 0; i < 200; i++ {
+		eng.Process(parser.NetworkEvent{
+			IPSource: net.ParseIP(attackerIP),
+			IPDest:   net.ParseIP("192.168.1.10"),
+			Protocol: "UDP",
+			DestPort: 8080,
+		})
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	eng.mu.RLock()
+	defer eng.mu.RUnlock()
+
+	alertKey := attackerIP + "|UDP_FLOOD"
+	if _, exists := eng.lastAlert[alertKey]; !exists {
+		t.Errorf("L'alerte UDP_FLOOD n'a pas été déclenchée")
+	}
+
+	if !mockBlocker.IsBlocked(attackerIP) {
+		t.Errorf("L'IP %s aurait dû être bloquée", attackerIP)
+	}
+}
+
+func TestNormalTraffic_NoAlert(t *testing.T) {
+	eng, mockBlocker := setupTestEngine()
+	normalIP := "10.0.0.200"
+
+	// Envoyer du trafic sous tous les seuils
+	// 2 ports différents (seuil port scan warning = 5)
+	for i := 1; i <= 2; i++ {
+		eng.Process(parser.NetworkEvent{
+			IPSource: net.ParseIP(normalIP),
+			IPDest:   net.ParseIP("192.168.1.10"),
+			Protocol: "TCP",
+			DestPort: uint16(i),
+		})
+	}
+
+	// 5 paquets SYN sur le même port (seuil SYN flood = 100)
+	for i := 0; i < 5; i++ {
+		eng.Process(parser.NetworkEvent{
+			IPSource: net.ParseIP(normalIP),
+			IPDest:   net.ParseIP("192.168.1.10"),
+			Protocol: "TCP",
+			DestPort: 80,
+			IsSYN:    true,
+		})
+	}
+
+	// 10 paquets UDP sur le même port (seuil UDP flood = 200)
+	for i := 0; i < 10; i++ {
+		eng.Process(parser.NetworkEvent{
+			IPSource: net.ParseIP(normalIP),
+			IPDest:   net.ParseIP("192.168.1.10"),
+			Protocol: "UDP",
+			DestPort: 8080,
+		})
+	}
+
+	eng.mu.RLock()
+	defer eng.mu.RUnlock()
+
+	// Aucune alerte ne doit exister
+	for key := range eng.lastAlert {
+		t.Errorf("Alerte inattendue pour du trafic normal : %s", key)
+	}
+
+	if mockBlocker.IsBlocked(normalIP) {
+		t.Errorf("L'IP %s ne devrait pas être bloquée pour du trafic normal", normalIP)
+	}
+}
+
+func TestPortScan_WarningOnly(t *testing.T) {
+	eng, mockBlocker := setupTestEngine()
+	attackerIP := "10.0.0.201"
+
+	// 5 ports = seuil WARNING exactement, pas CRITICAL (seuil = 15)
+	for i := 1; i <= 5; i++ {
+		eng.Process(parser.NetworkEvent{
+			IPSource: net.ParseIP(attackerIP),
+			IPDest:   net.ParseIP("192.168.1.10"),
+			Protocol: "TCP",
+			DestPort: uint16(i),
+		})
+	}
+
+	eng.mu.RLock()
+	defer eng.mu.RUnlock()
+
+	// Le WARNING doit exister
+	warningKey := attackerIP + "|PORT_SCAN|WARNING"
+	if _, exists := eng.lastAlert[warningKey]; !exists {
+		t.Errorf("L'alerte PORT_SCAN WARNING n'a pas été déclenchée")
+	}
+
+	// Le CRITICAL ne doit PAS exister
+	criticalKey := attackerIP + "|PORT_SCAN|CRITICAL"
+	if _, exists := eng.lastAlert[criticalKey]; exists {
+		t.Errorf("L'alerte PORT_SCAN CRITICAL ne devrait pas être déclenchée avec seulement 5 ports")
+	}
+
+	// L'IP ne doit PAS être bloquée (seul CRITICAL bloque)
+	if mockBlocker.IsBlocked(attackerIP) {
+		t.Errorf("L'IP %s ne devrait pas être bloquée pour un simple WARNING", attackerIP)
+	}
+}

@@ -22,13 +22,14 @@ type Engine struct {
 	lastAlert     map[string]time.Time
 	blocker       ips.Blocker
 	cfg           *config.Config
+	stopChan      chan struct{}
 }
 
 func NewEngine(b ips.Blocker, cfg *config.Config) *Engine {
 	if cfg == nil {
 		cfg = config.DefaultConfig()
 	}
-	return &Engine{
+	e := &Engine{
 		PortScanMem:   make(map[string]map[uint16]time.Time),
 		ICMPMem:       make(map[string]map[string]time.Time),
 		SYNMem:        make(map[string][]time.Time),
@@ -37,7 +38,10 @@ func NewEngine(b ips.Blocker, cfg *config.Config) *Engine {
 		lastAlert:     make(map[string]time.Time),
 		blocker:       b,
 		cfg:           cfg,
+		stopChan:      make(chan struct{}),
 	}
+	go e.cleanupLoop()
+	return e
 }
 
 func (e *Engine) shouldAlert(key string) bool {
@@ -137,13 +141,7 @@ func (e *Engine) detectSYNFlood(ip string, now time.Time) {
 	e.SYNMem[ip] = append(e.SYNMem[ip], now)
 
 	cutoff := now.Add(-window)
-	filtered := e.SYNMem[ip][:0]
-	for _, t := range e.SYNMem[ip] {
-		if t.After(cutoff) {
-			filtered = append(filtered, t)
-		}
-	}
-	e.SYNMem[ip] = filtered
+	e.SYNMem[ip] = compactTimeSlice(e.SYNMem[ip], cutoff)
 
 	if len(e.SYNMem[ip]) >= threshold {
 		key := ip + "|SYN_FLOOD"
@@ -170,13 +168,7 @@ func (e *Engine) detectBruteForce(ip string, port uint16, service string, now ti
 	e.BruteForceMem[ip][port] = append(e.BruteForceMem[ip][port], now)
 
 	cutoff := now.Add(-window)
-	filtered := e.BruteForceMem[ip][port][:0]
-	for _, t := range e.BruteForceMem[ip][port] {
-		if t.After(cutoff) {
-			filtered = append(filtered, t)
-		}
-	}
-	e.BruteForceMem[ip][port] = filtered
+	e.BruteForceMem[ip][port] = compactTimeSlice(e.BruteForceMem[ip][port], cutoff)
 
 	count := len(e.BruteForceMem[ip][port])
 	if count >= threshold {
@@ -201,13 +193,7 @@ func (e *Engine) detectUDPFlood(ip string, now time.Time) {
 	e.UDPFloodMem[ip] = append(e.UDPFloodMem[ip], now)
 
 	cutoff := now.Add(-window)
-	filtered := e.UDPFloodMem[ip][:0]
-	for _, t := range e.UDPFloodMem[ip] {
-		if t.After(cutoff) {
-			filtered = append(filtered, t)
-		}
-	}
-	e.UDPFloodMem[ip] = filtered
+	e.UDPFloodMem[ip] = compactTimeSlice(e.UDPFloodMem[ip], cutoff)
 
 	if len(e.UDPFloodMem[ip]) >= threshold {
 		key := ip + "|UDP_FLOOD"
@@ -280,4 +266,104 @@ func logAndPrint(a *alert.AlertInfos) {
 	}
 	fmt.Printf("%s %s | %s | %s | %s\n", icon, a.DegreAlert, a.AttaqueType, a.IpSrc, a.Description)
 	alert.LogAlert(a)
+}
+
+func (e *Engine) cleanupLoop() {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			e.cleanupStaleEntries()
+		case <-e.stopChan:
+			return
+		}
+	}
+}
+
+func (e *Engine) cleanupStaleEntries() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	now := time.Now()
+
+	// Cleanup PortScanMem
+	portWindow := time.Duration(e.cfg.PortScan.WindowSeconds) * time.Second
+	for ip, ports := range e.PortScanMem {
+		for port, t := range ports {
+			if now.Sub(t) > portWindow {
+				delete(ports, port)
+			}
+		}
+		if len(ports) == 0 {
+			delete(e.PortScanMem, ip)
+		}
+	}
+
+	// Cleanup ICMPMem
+	pingWindow := time.Duration(e.cfg.PingSweep.WindowSeconds) * time.Second
+	for ip, dests := range e.ICMPMem {
+		for dst, t := range dests {
+			if now.Sub(t) > pingWindow {
+				delete(dests, dst)
+			}
+		}
+		if len(dests) == 0 {
+			delete(e.ICMPMem, ip)
+		}
+	}
+
+	// Cleanup SYNMem
+	synWindow := time.Duration(e.cfg.SYNFlood.WindowSeconds) * time.Second
+	synCutoff := now.Add(-synWindow)
+	for ip, times := range e.SYNMem {
+		e.SYNMem[ip] = compactTimeSlice(times, synCutoff)
+		if len(e.SYNMem[ip]) == 0 {
+			delete(e.SYNMem, ip)
+		}
+	}
+
+	// Cleanup BruteForceMem
+	bfWindow := time.Duration(e.cfg.BruteForce.WindowSeconds) * time.Second
+	bfCutoff := now.Add(-bfWindow)
+	for ip, ports := range e.BruteForceMem {
+		for port, times := range ports {
+			ports[port] = compactTimeSlice(times, bfCutoff)
+			if len(ports[port]) == 0 {
+				delete(ports, port)
+			}
+		}
+		if len(ports) == 0 {
+			delete(e.BruteForceMem, ip)
+		}
+	}
+
+	// Cleanup UDPFloodMem
+	udpWindow := time.Duration(e.cfg.UDPFlood.WindowSeconds) * time.Second
+	udpCutoff := now.Add(-udpWindow)
+	for ip, times := range e.UDPFloodMem {
+		e.UDPFloodMem[ip] = compactTimeSlice(times, udpCutoff)
+		if len(e.UDPFloodMem[ip]) == 0 {
+			delete(e.UDPFloodMem, ip)
+		}
+	}
+}
+
+func (e *Engine) Stop() {
+	close(e.stopChan)
+}
+
+func compactTimeSlice(times []time.Time, cutoff time.Time) []time.Time {
+	filtered := times[:0]
+	for _, t := range times {
+		if t.After(cutoff) {
+			filtered = append(filtered, t)
+		}
+	}
+
+	if len(filtered) < cap(times)/2 {
+		compact := make([]time.Time, len(filtered))
+		copy(compact, filtered)
+		return compact
+	}
+	return filtered
 }

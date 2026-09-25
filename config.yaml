@@ -23,3 +23,5 @@ ping_sweep:
   window_seconds: 10
   threshold_warning: 4
   threshold_critical: 10
+
+log_file: "alerts.json"
