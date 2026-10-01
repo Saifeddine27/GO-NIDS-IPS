@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/logo.png" alt="NIDS-Go Logo" width="400"/>
-</p>
-
 # Go-NIDS/IPS
 
 Salut !  J'ai développé ce petit projet de NIDS (Network Intrusion Detection System) en Go pour expérimenter avec l'analyse de trafic réseau en temps réel. 
