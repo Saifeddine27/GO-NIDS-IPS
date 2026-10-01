@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.jpg" alt="NIDS-Go Logo" width="200"/>
+  <img src="assets/logo.jpeg" alt="NIDS-Go Logo" width="200"/>
 </p>
 
 # Go-NIDS/IPS
